@@ -1,12 +1,16 @@
+from __future__ import print_function
+
 import requests as re
 import numpy as np
-import cv2
 import random
+
+import cv2
 from PIL import Image
 from StringIO import StringIO
 
 import uuid
 import os
+import sys
 import shelve
 import atexit
 import argparse
@@ -24,7 +28,11 @@ def load_classifiers(paths):
     classifiers = []
     for path in paths:
         print("loading classifier {}".format(path))
-        classifiers.append(cv2.CascadeClassifier(path))
+        if os.path.isfile(path):
+            classifiers.append(cv2.CascadeClassifier(path))
+        else:
+            sys.exit("error: classifier file not found at {}".format(path))
+
     return classifiers
 
 
@@ -107,6 +115,7 @@ if __name__ == "__main__":
                         'fullbody.xml', 'lowerbody.xml', 'profileface.xml',
                         'upperbody.xml']
 
+    # TODO: This should not be hardcoded in, add to argparse
     classifier_paths = map(lambda s: './classifiers/haarcascade_' + s,
                            classifier_paths)
     classifiers = load_classifiers(classifier_paths)
