@@ -2,7 +2,6 @@ from __future__ import print_function
 
 from multiprocess import Process, active_children, Pool
 from multiprocess import Manager
-from threading import BoundedSemaphore as Semaphore
 
 import requests as re
 import numpy as np
@@ -21,6 +20,7 @@ import argparse
 
 import time
 
+
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
@@ -38,37 +38,33 @@ headers = {"Content-Type": "application/x-www-form-urlencoded"}
 def download_image_thread(location_q, image_q, MAX_DL_THREADS=10):
     print("Running Download Image Thread.")
 
-    
-    max_processes = MAX_DL_THREADS 
+    max_processes = MAX_DL_THREADS
     print("Creating a thread pool of size {} for downloading images...".format(max_processes))
     pool = Pool(processes=max_processes)
     # Allow us to have n processes runnning, and n processes scheduled to run
     # TODO: Manager is not necessary here, but is used to get around the fact
     # that thread-safe objects cannot be passed by reference, they must be
     # inheretence. A more lightweight solution should be found
-    workers = Manager().Semaphore(max_processes*2) 
+    workers = Manager().Semaphore(max_processes*2)
 
     def async_download(location):
         image = download_image(location)
         image_q.put((location, image), True)
-        print("releasing...")
         workers.release()
-        
+
     while True:
         location = location_q.get(True)
         workers.acquire()
         pool.apply_async(async_download, (location,))
-        print("image {} | location {}".format(image_q.qsize(),
-            location_q.qsize()))
 
-                
+
 def generate_location_thread(location_q, num_bits):
     print("Running Generate Location Thread.")
     while True:
         value = random.getrandbits(num_bits)
         location_q.put(value, True)
 
-    
+
 def classification_thread(image_q, classifiers, image_path, state, state_lock):
     print("Running Classification Thread")
     iteration = 0
@@ -92,7 +88,7 @@ def classification_thread(image_q, classifiers, image_path, state, state_lock):
             state_lock.acquire()
             state[unique_id] = location
             state_lock.release()
-        
+
 
 def spin_crawl_threads(state, classifiers, MAX_BIT_SIZE, MAX_DL_THREADS, image_path):
     print("Running threads...")
@@ -109,7 +105,8 @@ def spin_crawl_threads(state, classifiers, MAX_BIT_SIZE, MAX_DL_THREADS, image_p
                              args=(image_q, classifiers, image_path,
                                    state, state_lock), name="classification")
     download_image_t = Process(target=download_image_thread,
-                             args=(location_q, image_q, MAX_DL_THREADS), name="download_image")
+                               args=(location_q, image_q, MAX_DL_THREADS),
+                               name="download_image")
 
     download_image_t.start()
     classification.start()
@@ -120,10 +117,11 @@ def spin_crawl_threads(state, classifiers, MAX_BIT_SIZE, MAX_DL_THREADS, image_p
             thread.terminate()
 
     atexit.register(kill_threads)
-    
+
     download_image_t.join()
     classification.join()
     generate_location.join()
+
 
 def download_image(value, session=global_session):
     r = session.post(url, data="location={}".format(value), headers=headers)
@@ -174,14 +172,6 @@ def detect_interest_regions(image, classifiers):
     return interest_regions
 
 
-def dict_append(d, key, value):
-    if d.has_key(key):
-        temp = d[key]
-        temp.append(value)
-        d[key] = temp
-    else:
-        d[key] = [value]
-
 def ping_babel(value, verbose=True):
     import time
     try:
@@ -205,9 +195,9 @@ if __name__ == "__main__":
     parser.add_argument('--max', dest='MAX_BIT_SIZE', type=int, default=50000,
                         help='The maximum number of bits to generate for an image location')
     parser.add_argument('--threaded', '-t', dest='threaded',
-            action='store_true', default=False)
+                        action='store_true', default=False)
     parser.add_argument('--ping', '-p', dest='ping', action='store_true',
-            default=False, help="Ping the babel serves to test latency")
+                        default=False, help="Ping the babel serves to test latency")
     parser.add_argument('--max-dl', dest='MAX_DL_THREADS', default=10, type=int)
 
     args = parser.parse_args()
@@ -234,7 +224,7 @@ if __name__ == "__main__":
 
     iteration = 0
 
-    if d.has_key('seed'):
+    if 'seed' in d:
         print("Seeding from a previous state")
         random.setstate(d['seed'])
     else:
@@ -250,7 +240,6 @@ if __name__ == "__main__":
     classifier_paths = map(lambda s: './classifiers/haarcascade_' + s,
                            classifier_paths)
     classifiers = load_classifiers(classifier_paths)
-
 
     if threaded:
         spin_crawl_threads(d, classifiers, MAX_BIT_SIZE, MAX_DL_THREADS, image_path)
@@ -277,7 +266,7 @@ if __name__ == "__main__":
                 image.save(os.path.join(image_path, "{}.png".format(unique_id)))
 
                 # Save map of uuid to image location
-                if d.has_key('interest'):
+                if 'interest' in d:
                     temp = d['interest']
                     temp[unique_id] = location
                     d['interest'] = temp
@@ -285,5 +274,3 @@ if __name__ == "__main__":
                     d['interest'] = {unique_id: location}
 
             d['seed'] = random.getstate()
-
-
