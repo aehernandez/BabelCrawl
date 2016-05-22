@@ -77,7 +77,7 @@ def classification_thread(image_q, classifiers, image_path, state, state_lock):
         print("Found {} regions".format(len(regions)))
         if len(regions) > 0:
             # TODO: stronger unique ids
-            unique_id = uuid.uuid4()
+            unique_id = str(uuid.uuid4())
             print("Saving image with unique id {}".format(unique_id))
             image.save(os.path.join(image_path, "{}.png".format(unique_id)))
 
