@@ -2,7 +2,7 @@ from __future__ import print_function
 
 from multiprocess import Process, active_children, Pool
 from multiprocess import Manager
-from threading import Semaphore
+from threading import BoundedSemaphore as Semaphore
 
 import requests as re
 import numpy as np
@@ -37,22 +37,29 @@ headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
 def download_image_thread(location_q, image_q, MAX_DL_THREADS=10):
     print("Running Download Image Thread.")
+
     
     max_processes = MAX_DL_THREADS 
     print("Creating a thread pool of size {} for downloading images...".format(max_processes))
     pool = Pool(processes=max_processes)
     # Allow us to have n processes runnning, and n processes scheduled to run
-    workers = Semaphore(max_processes*2) 
+    # TODO: Manager is not necessary here, but is used to get around the fact
+    # that thread-safe objects cannot be passed by reference, they must be
+    # inheretence. A more lightweight solution should be found
+    workers = Manager().Semaphore(max_processes*2) 
 
     def async_download(location):
         image = download_image(location)
-        workers.release()
         image_q.put((location, image), True)
-
+        print("releasing...")
+        workers.release()
+        
     while True:
         location = location_q.get(True)
         workers.acquire()
-        pool.apply_async(async_download, (location,)).get()
+        pool.apply_async(async_download, (location,))
+        print("image {} | location {}".format(image_q.qsize(),
+            location_q.qsize()))
 
                 
 def generate_location_thread(location_q, num_bits):
