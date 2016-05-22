@@ -1,8 +1,6 @@
 from __future__ import print_function
-from multiprocessing import Process, Lock, active_children
-from multiprocessing import JoinableQueue as Queue
-
-from requests_futures.sessions import FuturesSession
+from multiprocess import Process, active_children, Pool 
+from multiprocess import Manager
 
 import requests as re
 import numpy as np
@@ -21,15 +19,14 @@ import argparse
 
 import time
 
-
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
-session = re.Session()
+global_session = re.Session()
 
 # `mount` a custom adapter that retries failed connections for HTTP and HTTPS requests.
-session.mount("http://", re.adapters.HTTPAdapter(max_retries=1))
-session.mount("https://", re.adapters.HTTPAdapter(max_retries=1))
+global_session.mount("http://", re.adapters.HTTPAdapter(max_retries=1))
+global_session.mount("https://", re.adapters.HTTPAdapter(max_retries=1))
 
 # prepare request information
 url = 'http://babelia.libraryofbabel.info/babelia.cgi'
@@ -38,56 +35,36 @@ headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
 def download_image_thread(location_q, image_q):
     print("Running Download Image Thread.")
-    session = FuturesSession()
-    # session.mount("http://", re.adapters.HTTPAdapter(max_retries=1))
-    # session.mount("https://", re.adapters.HTTPAdapter(max_retries=1))
+    
+    def async_download(location):
+        try:
+            image = download_image(location)
+            image_q.put((location, image), True)
+        except:
+            # TODO: Log this failure
+            # Something went wrong with the request
+            pass
 
 
-    def resolve_request(location):
-        start = time.time()
-        def resolver(session, r):
-            if r.status_code == re.codes.ok:
-                image_q.put((location, Image.open(StringIO(r.content))), True)
-                stop = time.time()
-                print("elapsed time {}".format(stop - start))
-            else:
-                # TODO: Log this failure
-                # Something went wrong with the request
-                pass
-
-            location_q.task_done()
-
-        return resolver
+    pool = Pool(processes=None)
 
     while True:
-        print("dl")
         location = location_q.get(True)
-        session.post(url, data="location={}".format(location), headers=headers,
-                     background_callback=resolve_request(location))
+        pool.apply_async(async_download, (location,))
 
+                
 def generate_location_thread(location_q, num_bits):
     print("Running Generate Location Thread.")
     while True:
-        print("gen")
         value = random.getrandbits(num_bits)
         location_q.put(value, True)
-        if location_q.full():
-            print("pausing location gen...")
-            location_q.join()
-        if location_q.empty():
-            print("started location gen...")
 
-        # perhaps unnecesary to save the state
-        # state_lock.acquire()
-        # state['seed'] = random.getstate()
-        # state_lock.release()
-
+    
 def classification_thread(image_q, classifiers, image_path, state, state_lock):
     print("Running Classification Thread")
     iteration = 0
     while True:
         (location, image) = image_q.get(True)
-        print("class")
 
         iteration = iteration + 1
         print("Proccesing image {}".format(iteration))
@@ -114,9 +91,12 @@ def classification_thread(image_q, classifiers, image_path, state, state_lock):
 
 def spin_crawl_threads(state, classifiers, UPPER_BIT_SIZE, image_path):
     print("Running threads...")
-    location_q = Queue(maxsize=512)
-    image_q = Queue()
-    state_lock = Lock()
+    manager = Manager()
+
+    location_q = manager.Queue(maxsize=15)
+    image_q = manager.Queue()
+    state_lock = manager.Lock()
+
     generate_location = Process(target=generate_location_thread,
                                 args=(location_q, UPPER_BIT_SIZE))
     classification = Process(target=classification_thread,
@@ -125,6 +105,7 @@ def spin_crawl_threads(state, classifiers, UPPER_BIT_SIZE, image_path):
     download_image_t = Process(target=download_image_thread,
                              args=(location_q, image_q))
 
+    # download_image.daemon = True
     download_image_t.start()
     classification.start()
     generate_location.start()
@@ -137,7 +118,7 @@ def spin_crawl_threads(state, classifiers, UPPER_BIT_SIZE, image_path):
 
     download_image_t.join()
 
-def download_image(value):
+def download_image(value, session=global_session):
     r = session.post(url, data="location={}".format(value), headers=headers)
     r.raise_for_status()
     return Image.open(StringIO(r.content))
@@ -204,6 +185,7 @@ def ping_babel(value, verbose=True):
             print("elapsed request time: {}s".format(stop - start))
     except:
         eprint("error: something went wrong when communicating with babel servers")
+
     return stop - start
 
 
@@ -215,9 +197,10 @@ if __name__ == "__main__":
                         help='The path to save images which contain interesting regions')
     parser.add_argument('--max', dest='UPPER_BIT_SIZE', type=int, default=50000,
                         help='The maximum number of bits to generate for an image location')
-    parser.add_argument('--threaded', '-t', dest='threaded', action='store_true')
-    parser.add_argument('--ping', '-p', dest='ping', action='store_true', default=False)
-    parser.set_defaults(threaded=False)
+    parser.add_argument('--threaded', '-t', dest='threaded',
+            action='store_true', default=False)
+    parser.add_argument('--ping', '-p', dest='ping', action='store_true',
+            default=False, help="Ping the babel serves to test latency")
 
     args = parser.parse_args()
     UPPER_BIT_SIZE = args.UPPER_BIT_SIZE
